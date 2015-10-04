@@ -414,15 +414,31 @@ _
 
 Expr = AdditiveExpr 
 
+nl = "\n"
 
 ExprList
-  = first:Expr rest:( __ ";" __ Expr )* {
-    p("ExprList")
-    p("first:", first)
-    p("rest:", rest)
-  }
-
-
+  = first:Expr rest:( __ "," __ rhand:Expr { p("rhand1:", rhand) } )+
+    {
+      p("ExprList => Expr (__ , __ Expr)+")
+      p("first:", first)
+      p("rest:", rest)
+      p("rhand2:", rhand);
+      var next = rest[next.length-1]
+      return next[3]
+    }
+  / first:Expr rest:(_ nl __ Expr)+
+    {
+      p("ExprList =>  first:Expr rest:(_ nl __ rhand:ExprList )+")
+      p("first:", first)
+      p("rest:", rest)
+      var next = rest[next.length-1]
+      return next[3]
+    }
+  / expr:Expr
+    {
+      p("ExprList => Expr __")
+      return expr
+    }
 //EOE = nl 
 //
 //ArgList = first:Arg rest:( __ "," __ Arg )* {
@@ -492,6 +508,7 @@ AdditiveExpr
       p("first:", first)
       p("rest:", rest)
       if (rest.length) {
+        p("type:", "additive-expr")
         p("op:", rest[0][1])
         p("lhand:", first)
         p("rhand:", rest[0][3])
@@ -500,6 +517,7 @@ AdditiveExpr
                , lhand: first
                , rhand: rest[0][3] }
       }
+      p("return first:", first)
       return first
     }
 
@@ -507,14 +525,15 @@ AdditiveOp = "+"
            / "-"
 
 MultiplicativeExpr
-  = first:PrimaryExpr
-    rest:( __ MultiplicativeOp __ PrimaryExpr )*
+     = first:PrimaryExpr
+       rest:( __ MultiplicativeOp __ PrimaryExpr )*
     {
       if (isNaN(g['MultiplicativeExpr'])) g['MultiplicativeExpr'] = 1
       p('MultiplicativeExpr =', g['MultiplicativeExpr'])
       p("first:", first)
       p("rest:", rest)
       if (rest.length) {
+        p("type:", "multiplicative-expr")
         p("op:", rest[0][1])
         p("lhand:", first)
         p("rhand:", rest[0][3])
@@ -523,6 +542,7 @@ MultiplicativeExpr
                , lhand: first
                , rhand: rest[0][3] }
       }
+      p("return first:", first)
       return first
     }
 
@@ -536,6 +556,7 @@ Literal = NullLiteral
         / RegularExpressionLiteral
 
 Term = PropertyName
+     / Literal
 
 PropertyName
   = IdentifierName
@@ -559,8 +580,13 @@ BooleanLiteral
 TrueToken       = "true"       !IdentifierPart
 FalseToken      = "false"      !IdentifierPart
 NullToken       = "null"       !IdentifierPart
+IfToken         = "if"         !IdentifierPart
+ThenToken       = "then"       !IdentifierPart
+WhileToken      = "while"      !IdentifierPart
+ForEach         = "foreach"    !IdentifierPart
+For             = "for"        !IdentifierPart
 DoToken         = "do"         !IdentifierPart
 EndTocket       = "end"        !IdentifierPart
 
 Program
-  = Expr
+  = ExprList
