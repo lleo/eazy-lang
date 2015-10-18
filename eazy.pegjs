@@ -1,12 +1,84 @@
 {
 
-  function p() { console.log.apply(console, arguments) }
+//  function p() { console.log.apply(console, arguments) }
+  var p = console.log
+
   p('********* RESTARTED *********')
   var g = {}
+
+  function filledArray(count, value) {
+    var result = new Array(count), i;
+
+    for (i = 0; i < count; i++) {
+      result[i] = value;
+    }
+
+    return result;
+  }
+
+  function extractOptional(optional, index) {
+    return optional ? optional[index] : null;
+  }
+
+  function extractList(list, index) {
+    var result = new Array(list.length), i;
+
+    for (i = 0; i < list.length; i++) {
+      result[i] = list[i][index];
+    }
+
+    return result;
+  }
+
+  function buildList(first, rest, index) {
+    return [first].concat(extractList(rest, index));
+  }
+
+  function buildTree(first, rest, builder) {
+    var result = first, i;
+
+    for (i = 0; i < rest.length; i++) {
+      result = builder(result, rest[i]);
+    }
+
+    return result;
+  }
+
+  function buildBinaryExpression(first, rest) {
+    return buildTree(first, rest, function(result, element) {
+      return {
+        type:     "BinaryExpression",
+        operator: element[1],
+        left:     result,
+        right:    element[3]
+      };
+    });
+  }
+
+  function buildLogicalExpression(first, rest) {
+    return buildTree(first, rest, function(result, element) {
+      return {
+        type:     "LogicalExpression",
+        operator: element[1],
+        left:     result,
+        right:    element[3]
+      };
+    });
+  }
+
+  function optionalList(value) {
+    return value !== null ? value : [];
+  }
+
 }
 
 Start
-  = __ program:Program __ { return program; }
+  = program:Program
+    {
+      p("Start->Program")
+//      return program;
+      p("program:", program)
+    }
 
 /* ----- A.1 Lexical Grammar ----- */
 
@@ -103,11 +175,12 @@ Keyword
   / DefaultToken
   / DeleteToken
   / DoToken
+  / EndToken
   / ElseToken
   / FinallyToken
   / ForToken
-  / FunctionToken
   / IfToken
+  / ThenToken
   / InstanceofToken
   / InToken
   / NewToken
@@ -120,7 +193,11 @@ Keyword
   / VarToken
   / VoidToken
   / WhileToken
-// / WithTocket
+  / FuncToken
+  / FnToken
+  / LoopToken
+
+// / WithToken
 
 FutureReservedWord
   = ClassToken
@@ -132,11 +209,29 @@ FutureReservedWord
   / SuperToken
 
 NullLiteral
-  = NullToken { return { type: "Literal", value: null }; }
+  = NullToken
+    {
+      return {
+        type:  "Literal"
+      , value: null
+      };
+    }
 
 BooleanLiteral
-  = TrueToken  { return { type: "Literal", value: true  }; }
-  / FalseToken { return { type: "Literal", value: false }; }
+  = TrueToken
+    {
+      return {
+        type: "Literal"
+      , value: true
+      };
+    }
+  / FalseToken
+    {
+      return {
+        type:  "Literal"
+      , value: false
+      };
+    }
 
 SignedNumericLiteral
   = sign:[+-]? _ num:NumericLiteral
@@ -148,29 +243,51 @@ SignedNumericLiteral
 NumericLiteral "number"
   = hexadecimal:HexIntegerLiteral !(IdentifierStart / DecimalDigit)
     {
-      p('hexadecimal:', hexadecimal)
+      p("NumericLiteral->HexIntegerLiteral")
+      p("hexadecimal:", hexadecimal)
       return hexadecimal
     }
   / decimal:DecimalLiteral !(IdentifierStart / DecimalDigit)
     {
-      p('decimal:', decimal)
+      p("NumericLiteral->DecimalLiteral")
+      p("decimal:", decimal)
       return decimal
     }
 
+IntegerLiteral
+  = hexadecimal:HexIntegerLiteral !(IdentifierStart / DecimalDigit)
+    {
+      p("IntegerLiteral->HexIntegerLiteral")
+      p("hexadecimal:", hexadecimal)
+      return hexadecimal
+    }
+  / decimal_integer:DecIntegerLiteral !(IdentifierStart / DecimalDigit)
+    {
+      p("IntegerLiteral->DecIntegerLiteral")
+      p("decimal_integer:", decimal_integer)
+      return decimal_integer
+    }
+
 DecimalLiteral
-  = DecimalIntegerLiteral "." DecimalDigit* ExponentPart? {
+  = DecIntegerLiteral "." DecimalDigit* ExponentPart? {
       return { type: "number", value: parseFloat(text()) };
     }
   / "." DecimalDigit+ ExponentPart? {
       return { type: "number", value: parseFloat(text()) };
     }
-  / DecimalIntegerLiteral ExponentPart? {
-      return { type: "number", value: parseFloat(text()) };
+  / decimal_integer_literal:DecIntegerLiteral ExponentPart? {
+      return { type: "number", value: decimal_integer_literal.value };
     }
 
-DecimalIntegerLiteral
+DecIntegerLiteral
   = "0"
+    {
+      return { type: "number", value: 0 }
+    }
   / NonZeroDecimalDigit DecimalDigit*
+    {
+      return { type: "number", value: parseInt(text()) }
+    }
 
 DecimalDigit
   = [0-9]
@@ -179,12 +296,12 @@ NonZeroDecimalDigit
   = [1-9]
 
 ExponentPart
-  = ExponentIndicator _SignedInteger
+  = ExponentIndicator ExponentSignedInteger
 
 ExponentIndicator
   = "e"i
 
-_SignedInteger
+ExponentSignedInteger
   = [+-]? DecimalDigit+
 
 HexIntegerLiteral
@@ -198,26 +315,34 @@ HexIntegerLiteral
 HexDigit
   = [0-9a-f]i
 
+
 StringLiteral "string"
-  = '"' chars:DoubleStringCharacter* '"' {
+  = '"' chars:DoubleStringCharacter* '"' 
+    {
       return { type: "Literal", value: chars.join("") };
     }
-  / "'" chars:SingleStringCharacter* "'" {
+  / "'" chars:SingleStringCharacter* "'"
+    {
       return { type: "Literal", value: chars.join("") };
     }
 
 DoubleStringCharacter
-  = !('"' / "\\" / LineTerminator) SourceCharacter { return text(); }
-  / "\\" sequence:EscapeSequence { return sequence; }
+  = !('"' / "\\" / LineTerminator) SourceCharacter
+    { return text(); }
+  / "\\" sequence:EscapeSequence
+    { return sequence; }
   / LineContinuation
 
 SingleStringCharacter
-  = !("'" / "\\" / LineTerminator) SourceCharacter { return text(); }
-  / "\\" sequence:EscapeSequence { return sequence; }
+  = !("'" / "\\" / LineTerminator) SourceCharacter
+    { return text(); }
+  / "\\" sequence:EscapeSequence
+    { return sequence; }
   / LineContinuation
 
 LineContinuation
-  = "\\" LineTerminatorSequence { return ""; }
+  = "\\" LineTerminatorSequence
+    { return ""; }
 
 EscapeSequence
   = CharacterEscapeSequence
@@ -289,7 +414,7 @@ RegularExpressionBackslashSequence
   = "\\" RegularExpressionNonTerminator
 
 RegularExpressionNonTerminator
-  = !LineTerminator SourceCharacter
+  = !LineTerminator SourceCharacter                     
 
 RegularExpressionClass
   = "[" RegularExpressionClassChar* "]"
@@ -370,17 +495,14 @@ ContinueToken   = "continue"   !IdentifierPart
 DebuggerToken   = "debugger"   !IdentifierPart
 DefaultToken    = "default"    !IdentifierPart
 DeleteToken     = "delete"     !IdentifierPart
-DoToken         = "do"         !IdentifierPart
-ElseToken       = "else"       !IdentifierPart
 EnumToken       = "enum"       !IdentifierPart
 ExportToken     = "export"     !IdentifierPart
 ExtendsToken    = "extends"    !IdentifierPart
 FalseToken      = "false"      !IdentifierPart
 FinallyToken    = "finally"    !IdentifierPart
 ForToken        = "for"        !IdentifierPart
-FunctionToken   = "function"   !IdentifierPart
+//FunctionToken   = "function"   !IdentifierPart
 GetToken        = "get"        !IdentifierPart
-IfToken         = "if"         !IdentifierPart
 ImportToken     = "import"     !IdentifierPart
 InstanceofToken = "instanceof" !IdentifierPart
 InToken         = "in"         !IdentifierPart
@@ -400,193 +522,743 @@ VoidToken       = "void"       !IdentifierPart
 WhileToken      = "while"      !IdentifierPart
 // WithToken       = "with"       !IdentifierPart
 
-/* Skipped */
+LoopToken       = "loop"       !IdentifierPart
 
-__
-  = (WhiteSpace / LineTerminatorSequence / Comment)*
-
-_
-  = (WhiteSpace / MultiLineCommentNoLineTerminator)*
-
-//
-//back to my stuff
-//
-
-Expr = AdditiveExpr 
-
-nl = "\n"
-
-ExprList
-  = first:Expr rest:( __ "," __ rhand:Expr { p("rhand1:", rhand) } )+
-    {
-      p("ExprList => Expr (__ , __ Expr)+")
-      p("first:", first)
-      p("rest:", rest)
-      p("rhand2:", rhand);
-      var next = rest[next.length-1]
-      return next[3]
-    }
-  / first:Expr rest:(_ nl __ Expr)+
-    {
-      p("ExprList =>  first:Expr rest:(_ nl __ rhand:ExprList )+")
-      p("first:", first)
-      p("rest:", rest)
-      var next = rest[next.length-1]
-      return next[3]
-    }
-  / expr:Expr
-    {
-      p("ExprList => Expr __")
-      return expr
-    }
-//EOE = nl 
-//
-//ArgList = first:Arg rest:( __ "," __ Arg )* {
-//          p("ArgList")
-//          p("first:", first)
-//          p("rest:", rest)
-//        }
-//
-//FuncExprNeked = "func" __ Name __ ArgList __ DoBlock {
-//
-//              }
-//
-//FuncExpr = "func" __ Name __ "(" __ ArgList __ ")" __ DoBlock {
-//
-//         }        
-//
-//LambdaExpr = "fn" ArgList DoBlock {
-//
-//           }
-
-/*
- *
- *
- */
-//MemberExpr
-//  = first:( PrimaryExpr / FuncExpr )
-//    rest:( __ "[" __ property:Expr __ "]" {
-//             return { property: property, computed: true }
-//           }
-//      / __ "." __ property:IdentifierName {
-//           return { property: property, computed: false }        
-//        }
-//    )*
-//
-//FuncExpr
-//  = 
-//
-//CallExpr
-//  =
-//
-//LHSExpr
-//  = CallExpr
-//  / MemberExpr
-//
-//PostfixExpr
-//  = argument:LHSExpr _ operator:PostfixOpr
-//    {
-//      return { type    : "UnpdateExpression"
-//             , operator: operator
-//             , argument: argument
-//             , prefix  : false }
-//    }
-//  / LHSExpr
-//
-//UnaryExpr
-//  = PostfixExpr
-//  / UnaryOper? UnaryExpr
-//
-//UnaryOper = "~" / "!" / delete
-
-AdditiveExpr
-  = first:MultiplicativeExpr
-    rest:( __ AdditiveOp __ MultiplicativeExpr )*
-    {
-      if (isNaN(g['AdditiveExpr'])) g['AdditiveExpr'] = 1
-      p('AdditiveExpr =', g['AdditiveExpr'])
-      p("first:", first)
-      p("rest:", rest)
-      if (rest.length) {
-        p("type:", "additive-expr")
-        p("op:", rest[0][1])
-        p("lhand:", first)
-        p("rhand:", rest[0][3])
-        return { type: "additive-expr"
-               , op: rest[0][1]
-               , lhand: first
-               , rhand: rest[0][3] }
-      }
-      p("return first:", first)
-      return first
-    }
-
-AdditiveOp = "+"
-           / "-"
-
-MultiplicativeExpr
-     = first:PrimaryExpr
-       rest:( __ MultiplicativeOp __ PrimaryExpr )*
-    {
-      if (isNaN(g['MultiplicativeExpr'])) g['MultiplicativeExpr'] = 1
-      p('MultiplicativeExpr =', g['MultiplicativeExpr'])
-      p("first:", first)
-      p("rest:", rest)
-      if (rest.length) {
-        p("type:", "multiplicative-expr")
-        p("op:", rest[0][1])
-        p("lhand:", first)
-        p("rhand:", rest[0][3])
-        return { type: "multiplicative-expr"
-               , op: rest[0][1]
-               , lhand: first
-               , rhand: rest[0][3] }
-      }
-      p("return first:", first)
-      return first
-    }
-
-MultiplicativeOp = "*" 
-                 / "/"
-
-Literal = NullLiteral
-        / BooleanLiteral
-        / NumericLiteral
-        / StringLiteral
-        / RegularExpressionLiteral
-
-Term = PropertyName
-     / Literal
-
-PropertyName
-  = IdentifierName
-  / StringLiteral
-  / NumericLiteral
-
-PrimaryExpr = Term
-            / "(" expr:Expr ")"
-              {
-                return expr
-              }
-
-NullLiteral
-  = NullToken { return { type: "literal", value: null }; }
-
-BooleanLiteral
-  = TrueToken  { return { type: "literal", value: true  }; }
-  / FalseToken { return { type: "literal", value: false }; }
-
-
-TrueToken       = "true"       !IdentifierPart
-FalseToken      = "false"      !IdentifierPart
-NullToken       = "null"       !IdentifierPart
 IfToken         = "if"         !IdentifierPart
 ThenToken       = "then"       !IdentifierPart
-WhileToken      = "while"      !IdentifierPart
-ForEach         = "foreach"    !IdentifierPart
-For             = "for"        !IdentifierPart
+ElseToken       = "else"       !IdentifierPart
+
 DoToken         = "do"         !IdentifierPart
-EndTocket       = "end"        !IdentifierPart
+EndToken        = "end"        !IdentifierPart
+FuncToken       = "func"       !IdentifierPart
+FnToken         = "fn"         !IdentifierPart
+
+CommaToken      = ","
+
+
+Literal
+  = NullLiteral
+  / BooleanLiteral
+  / NumericLiteral
+  / StringLiteral
+  / RegularExpressionLiteral
+
+/* Skipped */
+
+wsnl
+  = (WhiteSpace / LineTerminatorSequence / Comment)
+
+ws
+  = (WhiteSpace / MultiLineCommentNoLineTerminator)
+
+__ = wsnl+
+
+_ = ws+
+
+EOE
+  = wsnl* &DoToken
+//  / wsnl* &CommaToken
+
+EOS
+  = wsnl* ";"
+  / ws* SingleLineComment? LineTerminatorSequence
+  / ws* &EndToken
+  / wsnl* EOF
+
+EOF
+  = !.
+
+PrimaryExpression
+  = ThisToken { return { type: "ThisExpression" }; }
+  / Identifier
+  / Literal
+  / ArrayLiteral
+  / ObjectLiteral
+  / "(" wsnl* expr:Expression wsnl* ")" { return expr }
+
+ArrayLiteral
+  = "[" wsnl* elision:(Elision wsnl*)? "]"
+    {
+      p("ArrayLiteral->...")
+      return {
+        type: "ArrayExpression"
+      , elements: optionalList(extractOptional(elision, 0))
+      };
+    }
+  / "[" wsnl* elements:ElementList wsnl* "]"
+    {
+      p("ArrayLiteral->...")
+      return {
+        type:     "ArrayExpression",
+        elements: elements
+      };
+    }
+  / "[" wsnl* elements:ElementList wsnl* "," wsnl* elision:(Elision wsnl*)? "]"
+    {
+      p("ArrayLiteral->...")
+      return {
+        type:     "ArrayExpression"
+      , elements: elements.concat(optionalList(extractOptional(elision, 0)))
+      };
+    }
+
+ 
+ElementList
+  = first:(
+      elision:(Elision wsnl*)? element:AssignmentExpression
+      {
+        return optionalList(extractOptional(elision, 0)).concat(element);
+      }
+    )
+    rest:(
+      wsnl* "," wsnl* elision:(Elision wsnl*)? element:AssignmentExpression
+      {
+        return optionalList(extractOptional(elision, 0)).concat(element);
+      }
+    )*
+    { return Array.prototype.concat.apply(first, rest); }
+
+Elision
+  = "," commas:(wsnl* ",")*
+    {
+      p("Elision->...")
+      return filledArray(commas.length + 1, null);
+    }
+
+ObjectLiteral
+  = "{" wsnl* "}"
+    {
+      return {
+        type:       "ObjectExpression"
+      , properties: []
+      };
+    }
+  / "{" wsnl* properties:PropertyNameAndValueList wsnl* "}"
+    {
+      return {
+        type:       "ObjectExpression"
+      , properties: properties
+      };
+    }
+  / "{" wsnl* properties:PropertyNameAndValueList wsnl* "," wsnl* "}"
+    {
+      return {
+        type:       "ObjectExpression"
+      , properties: properties
+      };
+    }
+
+PropertyNameAndValueList
+  = first:PropertyAssignment rest:(wsnl* "," wsnl* PropertyAssignment)*
+    {
+      return buildList(first, rest, 3);
+    }
+
+PropertyAssignment
+  = key:PropertyName wsnl* ":" wsnl* value:AssignmentExpression
+    {
+      return { key:   key
+             , value: value
+             , kind:  "init" };
+    }
+  / GetToken __ key:PropertyName wsnl*
+    "(" wsnl* ")" wsnl*
+    "{" wsnl* body:FunctionBody wsnl* "}"
+    {
+      return {
+        key:   key,
+        value: {
+          type:   "FunctionExpression",
+          id:     null,
+          params: [],
+          body:   body
+        },
+        kind:  "get"
+      };
+    }
+  / SetToken __ key:PropertyName wsnl*
+    "(" wsnl* params:PropertySetParameterList wsnl* ")" wsnl*
+    "{" wsnl* body:FunctionBody wsnl* "}"
+    {
+      return {
+        key:   key,
+        value: {
+          type:   "FunctionExpression",
+          id:     null,
+          params: params,
+          body:   body
+        },
+        kind:  "set"
+      };
+    }
+
+//PropertyName
+//  = IdentifierName
+//  / StringLiteral
+//  / NumericLiteral
+PropertyName
+  = id:IdentifierName
+    {
+      p("PropertyName->IdendifierName")
+      p("id =", id)
+      return id
+    }
+  / string_literal:StringLiteral
+    {
+      p("PropertyName->StringLiteral")
+      p("string_literal = ", string_literal)
+      return string_literal
+    }
+  / integer_literal:IntegerLiteral
+    {
+      p("PropertyName->IntegerLiteral")
+      p("integer_literal =", integer_literal)
+      return integer_literal
+    }
+
+
+PropertySetParameterList
+  = id:Identifier
+    {
+      return [id]
+    }
+
+
+/* Expressions */
+
+MemberExpression
+  = first:(
+        PrimaryExpression
+      / FunctionExpression
+      / NewToken __ callee:MemberExpression __ args:ParenArguments
+        {
+          return {
+            type:        "NewExpression"
+            , callee:    callee
+            , arguments: args
+          };
+        }
+    )
+    rest:(
+        wsnl* "[" wsnl* property:Expression wsnl* "]"
+        {
+          return {
+            property: property
+          , computed: true
+          };
+        }
+      / wsnl* "." wsnl* property:IdentifierName
+        {
+          return {
+            property: property
+          , computed: false
+          };
+        }
+    )*
+    {
+      return buildTree(first, rest, function(result, element) {
+        return {
+          type:     "MemberExpression"
+        , object:   result
+        , property: element.property
+        , computed: element.computed
+        };
+      });
+    }
+
+NewExpression
+  = MemberExpression
+  / NewToken __ callee:NewExpression
+    {
+      return {
+        type:      "NewExpression"
+      , callee:    callee
+      , arguments: []
+      };
+    }
+
+CallExpression
+  = first:(
+      callee:MemberExpression wsnl* args:ParenArguments
+      {
+        return {
+          type:      "CallExpression"
+        , callee:    callee
+        , arguments: args
+        };
+      }
+    )
+    rest:(
+        wsnl* args:ParenArguments
+        {
+          return {
+            type:      "CallExpression"
+          , arguments: args
+          };
+        }
+      / wsnl* "[" wsnl* property:Expression wsnl* "]"
+        {
+          return {
+            type:     "MemberExpression"
+          , property: property
+          , computed: true
+          };
+        }
+      / wsnl* "." wsnl* property:IdentifierName
+        {
+          return {
+            type:     "MemberExpression"
+          , property: property
+          , computed: false
+          };
+        }
+    )*
+    {
+      return buildTree(first, rest, function(result, element) {
+        element[TYPES_TO_PROPERTY_NAMES[element.type]] = result;
+
+        return element
+      })
+    }
+//  / first:(
+//      callee:MemberExpression _ args:NakedArguments
+//      {
+//        return {
+//          type:      "CallExpression"
+//        , callee:    callee
+//        , arguments: args
+//        };
+//      }
+//    )
+//    rest:(
+//        wsnl* args:ParenArguments
+//        {
+//          return {
+//            type:      "CallExpression"
+//          , arguments: args
+//          };
+//        }
+//      / wsnl* "[" wsnl* property:Expression wsnl* "]"
+//        {
+//          return {
+//            type:     "MemberExpression"
+//          , property: property
+//          , computed: true
+//          };
+//        }
+//      / wsnl* "." wsnl* property:IdentifierName
+//        {
+//          return {
+//            type:     "MemberExpression"
+//          , property: property
+//          , computed: false
+//          };
+//        }
+//    )*
+//    {
+//      return buildTree(first, rest, function(result, element) {
+//        element[TYPES_TO_PROPERTY_NAMES[element.type]] = result;
+//
+//        return element
+//      })
+//    }
+
+ParenArguments
+  = "(" wsnl* args:(ParenArgumentList wsnl*)? ")"
+    {
+      return optionalList(extractOptional(args, 0))
+    }
+
+ParenArgumentList
+  = first:AssignmentExpression rest:(wsnl* "," wsnl* AssignmentExpression)*
+    {
+      return buildList(first, rest, 3);
+    }
+
+NakedArguments
+  = args:(NakedArgumentList)?
+    {
+      return optionalList(extractOptional(args, 0))
+    }
+
+NakedArgumentList
+  = first:AssignmentExpression 
+    rest:(wsnl* CommaToken wsnl* AssignmentExpression)*
+    {
+      return buildList(first, rest, 3)
+    }
+
+LeftHandSideExpression
+  = CallExpression 
+  / NewExpression 
+
+UnaryExpression
+  = LeftHandSideExpression 
+  / operator:UnaryOperator wsnl* argument:UnaryExpression
+    {
+      return {
+        type:     "UnaryExpression",
+        operator: operator,
+        argument: argument,
+        prefix:   true
+      };
+    }
+
+UnaryOperator
+  = $DeleteToken
+  / $VoidToken
+  / $TypeofToken
+  / $("+" !"=")
+  / $("-" !"=")
+  / "~"
+  / "!"
+
+MultiplicativeExpression
+  = first:UnaryExpression 
+    rest:(__ MultiplicativeOperator __ UnaryExpression )*
+    {
+      return buildBinaryExpression(first, rest)
+    }
+
+MultiplicativeOperator
+  = $("*" !"=")
+  / $("/" !"=")
+  / $("%" !"=")
+
+AdditiveExpression
+  = first:MultiplicativeExpression 
+    rest:(__ AdditiveOperator __ MultiplicativeExpression )*
+    {
+      return buildBinaryExpression(first, rest)
+    }
+
+AdditiveOperator
+  = $("+" ![+=])
+  / $("-" ![-=])
+
+ShiftExpression
+  = first:AdditiveExpression 
+    rest:(__ ShiftOperator __ AdditiveExpression )*
+    {
+      return buildBinaryExpression(first, rest)
+    }
+
+ShiftOperator
+  = $("<<"  !"=")
+  / $(">>>" !"=")
+  / $(">>"  !"=")
+
+RelationalExpression
+  = first:ShiftExpression 
+    rest:(__ RelationalOperator __ ShiftExpression )*
+    {
+      return buildBinaryExpression(first, rest)
+    }
+
+RelationalOperator
+  = "<="
+  / ">="
+  / $("<" !"<")
+  / $(">" !">")
+
+//  / $InstanceofToken
+//  / $InToken
+
+
+EqualityExpression
+  = first:RelationalExpression 
+    rest:(__ EqualityOperator __ RelationalExpression )*
+    {
+      return buildBinaryExpression(first,rest)
+    }
+
+EqualityOperator
+  = "==="
+  / "!=="
+  / "=="
+  / "!="
+
+BitwiseANDExpression
+  = first:EqualityExpression 
+    rest:(__ BitwiseANDOperator __ EqualityExpression )*
+    {
+      return buildBinaryExpression(first,rest)
+    }
+
+BitwiseANDOperator
+  = $("&" ![&=])
+
+BitwiseXORExpression
+  = first:BitwiseANDExpression 
+    rest:(__ BitwiseXOROperator __ BitwiseANDExpression )*
+    {
+      return buildBinaryExpression(first,rest)
+    }
+
+BitwiseXOROperator
+  = $("^" !"=")
+
+BitwiseORExpression
+  = first:BitwiseXORExpression 
+    rest:(__ BitwiseOROperator __ BitwiseXORExpression )*
+    {
+      return buildBinaryExpression(first,rest)
+    }
+
+BitwiseOROperator
+  = $("|" ![|=])
+
+LogicalANDExpression
+  = first:BitwiseORExpression 
+    rest:(__ LogicalANDOperator __ BitwiseORExpression )*
+    {
+      return buildBinaryExpression(first,rest)
+    }
+
+LogicalANDOperator
+  = "&&"
+
+LogicalORExpression
+  = first:LogicalANDExpression 
+    rest:(__ LogicalOROperator __ LogicalANDExpression )*
+    {
+      return buildBinaryExpression(first, rest)
+    }
+
+LogicalOROperator
+  = "||"
+
+AssignmentExpression
+  = left:LeftHandSideExpression __
+    "=" !"=" __
+    right:AssignmentExpression
+    {
+      return {
+        type:     "AssignmentExpression"
+      , operator: "="
+      , left:     left
+      , right:    right
+      };
+    }
+  / left:LeftHandSideExpression __
+    operator:AssignmentOperator __
+    right:AssignmentExpression
+    {
+      return {
+        type:     "AssignmentExpression"
+      , operator: operator
+      , left:     left
+      , right:    right
+      };
+    }
+  / LogicalORExpression
+
+AssignmentOperator
+  = "**="
+  / "*="
+  / "/="
+  / "%="
+  / "+="
+  / "-="
+  / "<<="
+  / ">>="
+  / ">>>="
+  / "&="
+  / "^="
+  / "|="
+
+Expression
+  = first:AssignmentExpression 
+    rest:(wsnl* "," wsnl* AssignmentExpression )*
+    {
+      p("Expression")
+      if (rest.length > 0) {
+        return { type: "SequenceExpression"
+               , expressions: buildList(first, rest, 3) }
+      }
+      else {
+        return first
+      }
+    }
+
+Statement
+  = VariableStatement
+  / EmptyStatement
+  / ExpressionStatement
+  / ContinueStatement
+  / BreakStatement
+  / ReturnStatement
+
+StatementList
+  = first:Statement rest:(__ Statement)*
+    {
+      p("StatementList->first:Statement rest:(__ Statement)*")
+      return buildList(first, rest, 1)
+    }
+
+VariableStatement
+  = VarToken __ declarations:VariableDeclarationList EOS
+    {
+      p("VariableStatement")
+      return {
+        type:        "VariableDeclaration"
+      , declarations: declarations
+      }
+    }
+
+VariableDeclarationList
+  = first:VariableDeclaration rest:(wsnl* "," wsnl* VariableDeclaration)*
+    {
+      p("VariableDeclarationList")
+      return buildList(first, rest, 3)
+    }
+
+VariableDeclaration
+  = id:Identifier init:(__ Initialiser)?
+    {
+      p("VariableDeclaration")
+      return {
+        type: "VariableDeclarator"
+      , id: id
+      , init: extractOptional(init, 1)
+      };
+    }
+
+Initialiser
+  = "=" !"=" __ expr:AssignmentExpression
+    {
+      p("Initialiser")
+      return expr
+    }
+
+EmptyStatement
+  = ";" { return { type: "EmptyStatement" }; }
+
+ExpressionStatement
+  = !(DoToken / FuncToken) expr:Expression EOS
+    {
+      p("ExpressionStatement")
+      p("expr:", expr)
+      return {
+        type: "ExpressionStatement"
+      , expression: expr
+      }
+    }
+
+ContinueStatement
+  = ContinueToken EOS
+    {
+      p("ContinueStatement")
+      return {
+        type: "ContinueStatement"
+      , label: null
+      };
+    }
+  / ContinueToken _ label:Identifier EOS
+    {
+      p("ContinueStatement LABEL")
+      return {
+        type: "ContinueStatement"
+      , label: label
+      };
+    }
+
+BreakStatement
+  = BreakToken EOS
+    {
+      p("BreakStatement")
+      return {
+        type: "BreakStatement"
+      , label: null
+      };
+    }
+  / BreakToken label:Identifier EOS
+    {
+      p("BreakToken LABEL")
+      return {
+        type: "BreakStatement"
+      , label: label
+      };
+    }
+
+ReturnStatement
+  = ReturnToken EOS
+    {
+      p("ReturnStatement")
+      return {
+        type: "ReturnStatement"
+      , arguement: null
+      };
+    }
+  / ReturnToken _ expr:Expression EOS
+    {
+      p("ReturnStatement EXPR")
+      return {
+        type: "ReturnStatement"
+      , arguement: expr
+      };
+    }
+
+FunctionDeclaration
+  = FuncToken _ name:Identifier __ params:NakedArguments
+     wsnl* DoToken __ body:FunctionBody wsnl* EndToken
+    {
+      p("FunctionDeclaration")
+      return {
+        type:   "FunctionDeclaration"
+      , name:   name
+      , params: params
+      , body:   body
+      }
+    }
+    
+FunctionExpression
+  = FnToken (_ name:PropertyName)? _ params:NakedArguments
+    __ DoToken __ body:FunctionBody wsnl* EndToken
+    {
+      p("FunctionExpression")
+      return {
+        type:   "FunctionExpression"
+      , name:   name
+      , params: params
+      , body:   body
+      }
+    }
+
+FunctionBody
+  = body:SourceElements?
+    {
+      return {
+        type: "BlockStatement"
+      , body: body
+      };
+    }
 
 Program
-  = ExprList
+  = body:SourceElements?
+    {
+      p("Program->SourceElements?")
+      return body
+    }
+
+SourceElements
+  = first:SourceElement wsnl* rest:(SourceElement wsnl*)*
+    {
+      p("SourceElements->first:SourceElement rest:(__ SourceElement)*")
+      return buildList(first, rest, 0)
+    }
+
+SourceElement
+  = statement:Statement
+    {
+      p("SourceElement->Statement")
+      p("statement:", statement)
+      return statement
+    }
+  / func_decl:FunctionDeclaration
+    {
+      p("SourceElement->FunctionDeclaration")
+      return func_decl
+    }
+
+//THE END//
